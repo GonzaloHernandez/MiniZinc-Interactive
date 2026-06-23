@@ -77,6 +77,13 @@ Once installed, reload your VS Code window (`Ctrl+Shift+P` / `Cmd+Shift+P` âž¡ï¸
 
 ---
 
+## Resources
+
+- **Source Code**: [GitHub Repository](https://github.com/GonzaloHernandez/MiniZinc-Interactive)
+- **Issue Tracker**: [Report Bugs or Request Features](https://github.com/GonzaloHernandez/MiniZinc-Interactive/issues)
+
+---
+
 ## File Structure
 
 ```

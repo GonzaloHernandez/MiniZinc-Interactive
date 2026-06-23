@@ -5,6 +5,14 @@
   "version": "1.0.0",
   "author": "Gonzalo Hernandez",
   "publisher": "sonar-dev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/GonzaloHernandez/MiniZinc-Interactive.git"
+  },
+  "bugs": {
+    "url": "https://github.com/GonzaloHernandez/MiniZinc-Interactive/issues"
+  },
+  "homepage": "https://github.com/GonzaloHernandez/MiniZinc-Interactive#readme",
   "icon": "icon.png",
   "engines": {
     "vscode": "^1.60.0"
