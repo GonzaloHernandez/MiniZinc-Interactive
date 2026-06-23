@@ -1,0 +1,8 @@
+debug.log
+install.sh
+*.mzn
+*.dzn
+*.vsix
+.git/
+.gitignore
+.vscode/

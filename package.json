@@ -1,0 +1,138 @@
+{
+  "name": "minizinc-interactive",
+  "displayName": "MiniZinc Interactive",
+  "description": "Sleek, interactive MiniZinc extension featuring real-time diagnostics (linter), autocomplete snippets, and a premium Solver Dashboard.",
+  "version": "1.0.0",
+  "author": "Gonzalo Hernandez",
+  "publisher": "sonar-dev",
+  "icon": "icon.png",
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Visualization",
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:minizinc",
+    "onLanguage:minizinc-data"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "minizinc",
+        "aliases": [
+          "MiniZinc",
+          "minizinc"
+        ],
+        "extensions": [
+          ".mzn"
+        ],
+        "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "minizinc-data",
+        "aliases": [
+          "MiniZinc Data",
+          "minizinc-data"
+        ],
+        "extensions": [
+          ".dzn"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "minizinc",
+        "scopeName": "source.mzn",
+        "path": "./syntaxes/minizinc.tmLanguage.json"
+      },
+      {
+        "language": "minizinc-data",
+        "scopeName": "source.dzn",
+        "path": "./syntaxes/minizinc-data.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "minizinc",
+        "path": "./snippets/minizinc.code-snippets"
+      }
+    ],
+    "commands": [
+      {
+        "command": "minizinc.openDashboard",
+        "title": "MiniZinc: Open Interactive Solver Dashboard",
+        "category": "MiniZinc",
+        "icon": "$(dashboard)"
+      },
+      {
+        "command": "minizinc.runModel",
+        "title": "MiniZinc: Run Model Directly",
+        "category": "MiniZinc",
+        "icon": "$(play)"
+      },
+      {
+        "command": "minizinc.runModelWithData",
+        "title": "MiniZinc: Run Model with Data File...",
+        "category": "MiniZinc",
+        "icon": "$(play-circle)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "minizinc.openDashboard",
+          "when": "resourceLangId == minizinc",
+          "group": "navigation"
+        }
+      ],
+      "editor/title/run": [
+        {
+          "command": "minizinc.runModel",
+          "when": "resourceLangId == minizinc",
+          "group": "navigation@1"
+        },
+        {
+          "command": "minizinc.runModelWithData",
+          "when": "resourceLangId == minizinc",
+          "group": "navigation@2"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "minizinc.openDashboard",
+          "when": "resourceLangId == minizinc",
+          "group": "1_modification"
+        },
+        {
+          "command": "minizinc.runModel",
+          "when": "resourceLangId == minizinc",
+          "group": "1_modification"
+        },
+        {
+          "command": "minizinc.runModelWithData",
+          "when": "resourceLangId == minizinc",
+          "group": "1_modification"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "minizinc.runModel",
+        "key": "ctrl+r",
+        "mac": "cmd+r",
+        "when": "editorTextFocus && editorLangId == minizinc"
+      },
+      {
+        "command": "minizinc.runModel",
+        "key": "ctrl+f5",
+        "mac": "cmd+f5",
+        "when": "editorTextFocus && editorLangId == minizinc"
+      }
+    ]
+  }
+}

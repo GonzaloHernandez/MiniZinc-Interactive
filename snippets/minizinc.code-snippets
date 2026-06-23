@@ -1,0 +1,85 @@
+{
+  "Constraint": {
+    "prefix": "constraint",
+    "body": [
+      "constraint ${1:expression};"
+    ],
+    "description": "Add a constraint to the model"
+  },
+  "Forall": {
+    "prefix": "forall",
+    "body": [
+      "forall(${1:i} in ${2:index})(",
+      "\t${3:constraint_expression}",
+      ")"
+    ],
+    "description": "Universal quantifier (forall) loop expression"
+  },
+  "Sum": {
+    "prefix": "sum",
+    "body": [
+      "sum(${1:i} in ${2:index})(",
+      "\t${3:expression}",
+      ")"
+    ],
+    "description": "Summation loop expression"
+  },
+  "Variable Integer": {
+    "prefix": "varint",
+    "body": [
+      "var ${1:1..10}: ${2:x};"
+    ],
+    "description": "Define an integer decision variable"
+  },
+  "Variable Boolean": {
+    "prefix": "varbool",
+    "body": [
+      "var bool: ${1:x};"
+    ],
+    "description": "Define a boolean decision variable"
+  },
+  "Variable Float": {
+    "prefix": "varfloat",
+    "body": [
+      "var float: ${1:x};"
+    ],
+    "description": "Define a float decision variable"
+  },
+  "Solve Satisfy": {
+    "prefix": "solvesat",
+    "body": [
+      "solve satisfy;"
+    ],
+    "description": "Solve for a satisfaction problem"
+  },
+  "Solve Minimize": {
+    "prefix": "solvemin",
+    "body": [
+      "solve minimize ${1:objective_variable};"
+    ],
+    "description": "Solve for a minimization problem"
+  },
+  "Solve Maximize": {
+    "prefix": "solvemax",
+    "body": [
+      "solve maximize ${1:objective_variable};"
+    ],
+    "description": "Solve for a maximization problem"
+  },
+  "Output Block": {
+    "prefix": "output",
+    "body": [
+      "output [",
+      "\t\"${1:variable_name} = \", show(${1:variable_name}), \"\\n\"",
+      "];"
+    ],
+    "description": "Define model output display"
+  },
+  "Array Variable Integer": {
+    "prefix": "arrayvarint",
+    "body": [
+      "array[${1:index_range}] of var ${2:value_range}: ${3:array_name};"
+    ],
+    "description": "Define an array of integer decision variables"
+  }
+}

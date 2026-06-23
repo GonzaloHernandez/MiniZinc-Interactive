@@ -1,0 +1,15 @@
+# Logs
+logs
+*.log
+debug.log
+
+# Dependency directories
+node_modules/
+jspm_packages/
+
+# Package files
+*.vsix
+
+# OS metadata
+.DS_Store
+Thumbs.db
