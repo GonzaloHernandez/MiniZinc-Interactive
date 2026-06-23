@@ -2,7 +2,7 @@
 set -e
 
 # Target directory
-EXT_DIR="$HOME/.antigravity-ide/extensions/sonar-dev.minizinc-interactive-1.0.0"
+EXT_DIR="$HOME/.antigravity-ide/extensions/sonar-dev.minizinc-interactive-1.0.1"
 
 echo "=== Installing MiniZinc Interactive ==="
 echo "Target directory: $EXT_DIR"
