@@ -2,7 +2,7 @@
   "name": "minizinc-interactive",
   "displayName": "MiniZinc Interactive",
   "description": "Sleek, interactive MiniZinc extension featuring real-time diagnostics (linter), autocomplete snippets, and a premium Solver Dashboard.",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "author": "Gonzalo Hernandez",
   "publisher": "sonar-dev",
   "icon": "icon.png",
@@ -88,6 +88,11 @@
         "title": "MiniZinc: Run Model with Data File...",
         "category": "MiniZinc",
         "icon": "$(play-circle)"
+      },
+      {
+        "command": "minizinc.clearOutput",
+        "title": "MiniZinc: Clear Output",
+        "category": "MiniZinc"
       }
     ],
     "menus": {
@@ -139,6 +144,12 @@
         "command": "minizinc.runModel",
         "key": "ctrl+f5",
         "mac": "cmd+f5",
+        "when": "editorTextFocus && editorLangId == minizinc"
+      },
+      {
+        "command": "minizinc.clearOutput",
+        "key": "ctrl+k",
+        "mac": "cmd+k",
         "when": "editorTextFocus && editorLangId == minizinc"
       }
     ]

@@ -5,6 +5,7 @@ const fs = require('fs');
 
 let activeProcess = null;
 let standardOutputChannel = null;
+let activeDashboardPanel = null;
 
 function log(msg) {
     try {
@@ -297,7 +298,10 @@ function activate(context) {
             vscode.window.showWarningMessage('Please open a MiniZinc (.mzn) file first.');
             return;
         }
-        await executeModel(activeEditor.document.uri.fsPath, null);
+        if (activeEditor.document.isDirty) {
+            await activeEditor.document.save();
+        }
+        await runModelWithParametersCheck(activeEditor.document.uri.fsPath, null);
     });
 
     // Command 1.2: Run Model with Data Selection (1-Click file picker)
@@ -306,6 +310,9 @@ function activate(context) {
         if (!activeEditor || activeEditor.document.languageId !== 'minizinc') {
             vscode.window.showWarningMessage('Please open a MiniZinc (.mzn) file first.');
             return;
+        }
+        if (activeEditor.document.isDirty) {
+            await activeEditor.document.save();
         }
 
         const modelPath = activeEditor.document.uri.fsPath;
@@ -333,7 +340,7 @@ function activate(context) {
             vscode.window.showInformationMessage('No .dzn data files found in the workspace. Running directly.');
         }
 
-        await executeModel(modelPath, selectedDataPath);
+        await runModelWithParametersCheck(modelPath, selectedDataPath);
     });
 
     // Command 2: Open Interactive Solver Dashboard (Webview)
@@ -357,6 +364,7 @@ function activate(context) {
                 retainContextWhenHidden: true
             }
         );
+        activeDashboardPanel = panel;
 
         // Fetch solvers and data files
         getSolvers((solvers) => {
@@ -381,68 +389,104 @@ function activate(context) {
                             dashboardProcess.kill();
                         }
 
-                        panel.webview.postMessage({ type: 'start' });
-
-                        const runArgs = [modelPath];
-                        if (message.dataPath) {
-                            runArgs.push(message.dataPath);
-                        }
-                        if (message.solverId && message.solverId !== 'default') {
-                            runArgs.push('--solver', message.solverId);
+                        // Auto-save model file if it is open and dirty
+                        const doc = vscode.workspace.textDocuments.find(d => d.uri.fsPath === modelPath);
+                        if (doc && doc.isDirty) {
+                            await doc.save();
                         }
 
-                        runArgs.push('--json-stream');
-
-                        if (message.allSolutions) {
-                            runArgs.push('-a');
-                        }
-                        if (message.statistics) {
-                            runArgs.push('-s');
-                        }
-                        if (message.timeLimit) {
-                            runArgs.push('--time-limit', String(message.timeLimit));
-                        }
-                        if (message.customArgs) {
-                            const extra = message.customArgs.trim().split(/\s+/).filter(x => x.length > 0);
-                            runArgs.push(...extra);
-                        }
-
-                        dashboardProcess = cp.spawn('minizinc', runArgs);
-                        let buffer = '';
-
-                        dashboardProcess.stdout.on('data', (data) => {
-                            buffer += data.toString();
-                            const lines = buffer.split('\n');
-                            buffer = lines.pop(); // Hold incomplete line
-
-                            for (const line of lines) {
-                                if (line.trim().length === 0) continue;
-                                panel.webview.postMessage({ type: 'raw', content: line });
-
-                                try {
-                                    const parsed = JSON.parse(line);
-                                    if (parsed.type === 'solution') {
-                                        panel.webview.postMessage({ type: 'solution', data: parsed });
-                                    } else if (parsed.type === 'statistics') {
-                                        panel.webview.postMessage({ type: 'stats', data: parsed.statistics });
-                                    } else if (parsed.type === 'status') {
-                                        panel.webview.postMessage({ type: 'status', value: parsed.status });
-                                    }
-                                } catch (e) {
-                                    // Not JSON, ignore or log
-                                }
+                        // Check for missing parameters
+                        vscode.window.withProgress({
+                            location: vscode.ProgressLocation.Notification,
+                            title: "MiniZinc: Analyzing model parameters...",
+                            cancellable: false
+                        }, async () => {
+                            const analysis = await analyzeModelParameters(modelPath, message.dataPath);
+                            if (analysis && analysis.input && Object.keys(analysis.input).length > 0) {
+                                showParameterDialog(modelPath, message.dataPath, analysis.input, async (tempDznPath) => {
+                                    startDashboardSolver(tempDznPath);
+                                });
+                            } else {
+                                startDashboardSolver(null);
                             }
                         });
 
-                        dashboardProcess.stderr.on('data', (data) => {
-                            const text = data.toString();
-                            panel.webview.postMessage({ type: 'raw', content: `[Error] ${text}` });
-                        });
+                        function startDashboardSolver(tempDznPath) {
+                            panel.webview.postMessage({ type: 'start' });
 
-                        dashboardProcess.on('close', (code) => {
-                            dashboardProcess = null;
-                            panel.webview.postMessage({ type: 'exit', code: code });
-                        });
+                            const runArgs = [modelPath];
+                            if (message.dataPath) {
+                                runArgs.push(message.dataPath);
+                            }
+                            if (tempDznPath) {
+                                runArgs.push(tempDznPath);
+                            }
+                            if (message.solverId && message.solverId !== 'default') {
+                                runArgs.push('--solver', message.solverId);
+                            }
+
+                            runArgs.push('--json-stream');
+
+                            if (message.allSolutions) {
+                                runArgs.push('-a');
+                            }
+                            if (message.statistics) {
+                                runArgs.push('-s');
+                            }
+                            if (message.timeLimit) {
+                                runArgs.push('--time-limit', String(message.timeLimit));
+                            }
+                            if (message.customArgs) {
+                                const extra = message.customArgs.trim().split(/\s+/).filter(x => x.length > 0);
+                                runArgs.push(...extra);
+                            }
+
+                            dashboardProcess = cp.spawn('minizinc', runArgs);
+                            let buffer = '';
+
+                            dashboardProcess.stdout.on('data', (data) => {
+                                buffer += data.toString();
+                                const lines = buffer.split('\n');
+                                buffer = lines.pop(); // Hold incomplete line
+
+                                for (const line of lines) {
+                                    if (line.trim().length === 0) continue;
+                                    panel.webview.postMessage({ type: 'raw', content: line });
+
+                                    try {
+                                        const parsed = JSON.parse(line);
+                                        if (parsed.type === 'solution') {
+                                            panel.webview.postMessage({ type: 'solution', data: parsed });
+                                        } else if (parsed.type === 'statistics') {
+                                            panel.webview.postMessage({ type: 'stats', data: parsed.statistics });
+                                        } else if (parsed.type === 'status') {
+                                            panel.webview.postMessage({ type: 'status', value: parsed.status });
+                                        }
+                                    } catch (e) {
+                                        // Not JSON, ignore or log
+                                    }
+                                }
+                            });
+
+                            dashboardProcess.stderr.on('data', (data) => {
+                                const text = data.toString();
+                                panel.webview.postMessage({ type: 'raw', content: `[Error] ${text}` });
+                            });
+
+                            dashboardProcess.on('close', (code) => {
+                                dashboardProcess = null;
+                                if (tempDznPath) {
+                                    try {
+                                        if (fs.existsSync(tempDznPath)) {
+                                            fs.unlinkSync(tempDznPath);
+                                        }
+                                    } catch (e) {
+                                        log('Failed to delete temp DZN: ' + e.message);
+                                    }
+                                }
+                                panel.webview.postMessage({ type: 'exit', code: code });
+                            });
+                        }
                         break;
 
                     case 'stop':
@@ -469,12 +513,25 @@ function activate(context) {
             if (dashboardProcess) {
                 dashboardProcess.kill();
             }
+            if (activeDashboardPanel === panel) {
+                activeDashboardPanel = null;
+            }
         }, null, context.subscriptions);
+    });
+
+    let clearOutputDisposable = vscode.commands.registerCommand('minizinc.clearOutput', () => {
+        if (standardOutputChannel) {
+            standardOutputChannel.clear();
+        }
+        if (activeDashboardPanel) {
+            activeDashboardPanel.webview.postMessage({ type: 'clear' });
+        }
     });
 
     context.subscriptions.push(runModelDisposable);
     context.subscriptions.push(runModelWithDataDisposable);
     context.subscriptions.push(openDashboardDisposable);
+    context.subscriptions.push(clearOutputDisposable);
 
     // Register Rename Provider (F2)
     const renameProvider = vscode.languages.registerRenameProvider('minizinc', {
@@ -565,14 +622,35 @@ function deactivate() {
     }
 }
 
-async function executeModel(modelPath, selectedDataPath) {
+async function executeModel(modelPath, selectedDataPath, tempDznPath) {
     // Show output channel
     standardOutputChannel.clear();
     standardOutputChannel.show(true);
+
+    // Return cursor focus to the active text editor code after a short delay
+    // to ensure VS Code's output channel panel display layout changes do not override it.
+    setTimeout(() => {
+        let targetEditor = vscode.window.activeTextEditor;
+        if (!targetEditor || targetEditor.document.uri.fsPath !== modelPath) {
+            targetEditor = vscode.window.visibleTextEditors.find(
+                editor => editor.document.uri.fsPath === modelPath
+            );
+        }
+        if (targetEditor) {
+            vscode.window.showTextDocument(targetEditor.document, {
+                viewColumn: targetEditor.viewColumn,
+                preserveFocus: false
+            });
+        }
+    }, 100);
+
     standardOutputChannel.appendLine(`[MiniZinc] Starting compilation and run...`);
     standardOutputChannel.appendLine(`[MiniZinc] Model: ${path.basename(modelPath)}`);
     if (selectedDataPath) {
         standardOutputChannel.appendLine(`[MiniZinc] Data: ${path.basename(selectedDataPath)}`);
+    }
+    if (tempDznPath) {
+        standardOutputChannel.appendLine(`[MiniZinc] Interactive Parameters: Loaded`);
     }
     standardOutputChannel.appendLine(`--------------------------------------------------`);
 
@@ -580,27 +658,415 @@ async function executeModel(modelPath, selectedDataPath) {
     if (selectedDataPath) {
         args.push(selectedDataPath);
     }
-    args.push('-s'); // Include statistics
+    if (tempDznPath) {
+        args.push(tempDznPath);
+    }
 
     if (activeProcess) {
         activeProcess.kill();
         standardOutputChannel.appendLine(`[MiniZinc] Terminated previous running instance.`);
     }
 
-    activeProcess = cp.spawn('minizinc', args);
+    try {
+        activeProcess = cp.spawn('minizinc', args);
 
-    activeProcess.stdout.on('data', (data) => {
-        standardOutputChannel.append(data.toString());
+        activeProcess.stdout.on('data', (data) => {
+            standardOutputChannel.append(data.toString());
+        });
+
+        activeProcess.stderr.on('data', (data) => {
+            standardOutputChannel.append(`[Error] ${data.toString()}`);
+        });
+
+        activeProcess.on('close', (code) => {
+            activeProcess = null;
+            if (tempDznPath) {
+                try {
+                    if (fs.existsSync(tempDznPath)) {
+                        fs.unlinkSync(tempDznPath);
+                    }
+                } catch (e) {
+                    log('Failed to delete temp DZN: ' + e.message);
+                }
+            }
+            standardOutputChannel.appendLine(`--------------------------------------------------`);
+            standardOutputChannel.appendLine(`[MiniZinc] Finished with exit code ${code}`);
+        });
+    } catch (err) {
+        if (tempDznPath) {
+            try {
+                if (fs.existsSync(tempDznPath)) {
+                    fs.unlinkSync(tempDznPath);
+                }
+            } catch (e) {
+                log('Failed to delete temp DZN: ' + e.message);
+            }
+        }
+        standardOutputChannel.appendLine(`[Error] Failed to spawn minizinc process: ${err.message}`);
+    }
+}
+
+function analyzeModelParameters(modelPath, selectedDataPath) {
+    return new Promise((resolve) => {
+        let cmd = `minizinc --model-interface-only "${modelPath}"`;
+        if (selectedDataPath) {
+            cmd += ` "${selectedDataPath}"`;
+        }
+        log('Running analysis: ' + cmd);
+        cp.exec(cmd, (err, stdout, stderr) => {
+            if (err) {
+                log('Analysis command failed: ' + err.message + '\n' + stderr);
+                resolve(null);
+                return;
+            }
+            try {
+                const lines = stdout.split('\n');
+                for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (trimmed.startsWith('{"type": "interface"')) {
+                        const data = JSON.parse(trimmed);
+                        resolve(data);
+                        return;
+                    }
+                }
+                resolve(null);
+            } catch (e) {
+                log('Failed to parse analysis JSON: ' + e.message);
+                resolve(null);
+            }
+        });
     });
+}
 
-    activeProcess.stderr.on('data', (data) => {
-        standardOutputChannel.append(`[Error] ${data.toString()}`);
-    });
+function getParameterTypeLabel(paramInfo) {
+    if (paramInfo.dim && paramInfo.dim > 0) {
+        const typeStr = paramInfo.type || 'int';
+        if (paramInfo.dim === 1) return `array of ${typeStr}`;
+        if (paramInfo.dim === 2) return `2D array of ${typeStr}`;
+        return `${paramInfo.dim}D array of ${typeStr}`;
+    }
+    return paramInfo.type || 'int';
+}
 
-    activeProcess.on('close', (code) => {
-        activeProcess = null;
-        standardOutputChannel.appendLine(`--------------------------------------------------`);
-        standardOutputChannel.appendLine(`[MiniZinc] Finished with exit code ${code}`);
+function getParameterPlaceholder(paramInfo) {
+    if (paramInfo.dim && paramInfo.dim > 0) {
+        const typeStr = paramInfo.type || 'int';
+        if (typeStr === 'int') return `e.g. [1, 2, 3]`;
+        if (typeStr === 'float') return `e.g. [1.0, 2.5, 3.8]`;
+        if (typeStr === 'bool') return `e.g. [true, false, true]`;
+        return `e.g. [ ... ]`;
+    }
+    const typeStr = paramInfo.type || 'int';
+    if (typeStr === 'int') return `e.g. 10`;
+    if (typeStr === 'float') return `e.g. 3.14`;
+    if (typeStr === 'bool') return `e.g. true`;
+    if (typeStr === 'string') return `e.g. "hello"`;
+    return `e.g. value`;
+}
+
+function getParameterWebviewContent(modelName, inputParams) {
+    let formFieldsHtml = '';
+    for (const [name, paramInfo] of Object.entries(inputParams)) {
+        const typeLabel = getParameterTypeLabel(paramInfo);
+        const placeholder = getParameterPlaceholder(paramInfo);
+        
+        if (!paramInfo.dim && paramInfo.type === 'bool') {
+            formFieldsHtml += `
+            <div class="form-group">
+                <label class="param-label" for="param-${name}">
+                    <span class="param-name">${name}</span>
+                    <span class="param-type">${typeLabel}</span>
+                </label>
+                <select id="param-${name}" name="${name}" class="param-input">
+                    <option value="true">true</option>
+                    <option value="false">false</option>
+                </select>
+            </div>`;
+        } else {
+            formFieldsHtml += `
+            <div class="form-group">
+                <label class="param-label" for="param-${name}">
+                    <span class="param-name">${name}</span>
+                    <span class="param-type">${typeLabel}</span>
+                </label>
+                <input type="text" id="param-${name}" name="${name}" class="param-input" placeholder="${placeholder}" required />
+            </div>`;
+        }
+    }
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Model Parameters</title>
+    <style>
+        :root {
+            --bg-main: var(--vscode-editor-background, #1e1e1e);
+            --bg-card: var(--vscode-sideBar-background, #252526);
+            --border-card: var(--vscode-widget-border, rgba(255, 255, 255, 0.1));
+            --text-primary: var(--vscode-editor-foreground, #d4d4d4);
+            --text-secondary: var(--vscode-descriptionForeground, #858585);
+            --accent-indigo: var(--vscode-button-background, #007acc);
+            --accent-indigo-hover: var(--vscode-button-hoverBackground, #0062a3);
+            --btn-secondary-bg: var(--vscode-button-secondaryBackground, #3a3d3e);
+            --btn-secondary-hover: var(--vscode-button-secondaryHoverBackground, #45494a);
+            --input-bg: var(--vscode-input-background, #3c3c3c);
+            --input-border: var(--vscode-input-border, #3c3c3c);
+            --input-foreground: var(--vscode-input-foreground, #cccc88);
+        }
+
+        body {
+            background-color: var(--bg-main);
+            color: var(--text-primary);
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        .dialog-container {
+            width: 100%;
+            max-width: 500px;
+            background: linear-gradient(145deg, var(--bg-card), rgba(30, 30, 30, 0.95));
+            border: 1px solid var(--border-card);
+            border-radius: 12px;
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+            padding: 28px;
+            box-sizing: border-box;
+            backdrop-filter: blur(10px);
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.97) translateY(10px); }
+            to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+
+        .dialog-header {
+            margin-bottom: 24px;
+            border-bottom: 1px solid var(--border-card);
+            padding-bottom: 16px;
+        }
+
+        .dialog-header h1 {
+            font-size: 1.4rem;
+            margin: 0 0 6px 0;
+            font-weight: 600;
+            background: linear-gradient(135deg, #a5b4fc, #818cf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .dialog-header p {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin: 0;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .param-label {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.9rem;
+            font-weight: 550;
+            margin-bottom: 8px;
+            color: var(--text-primary);
+        }
+
+        .param-name {
+            font-family: monospace;
+            font-size: 0.95rem;
+            color: #818cf8;
+        }
+
+        .param-type {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            background: rgba(255, 255, 255, 0.05);
+            padding: 2px 6px;
+            border-radius: 4px;
+            border: 1px solid rgba(255, 255, 255, 0.03);
+            font-family: monospace;
+        }
+
+        select.param-input, input.param-input {
+            width: 100%;
+            background-color: var(--input-bg);
+            border: 1px solid var(--input-border);
+            border-radius: 6px;
+            padding: 10px 12px;
+            color: var(--input-foreground);
+            font-size: 0.9rem;
+            box-sizing: border-box;
+            outline: none;
+            transition: all 0.2s ease;
+        }
+
+        select.param-input:focus, input.param-input:focus {
+            border-color: #818cf8;
+            box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.25);
+        }
+
+        .btn-container {
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+            margin-top: 28px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border-card);
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s ease;
+        }
+
+        .btn-secondary {
+            background-color: var(--btn-secondary-bg);
+            color: var(--text-primary);
+        }
+
+        .btn-secondary:hover {
+            background-color: var(--btn-secondary-hover);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #6366f1, #4f46e5);
+            color: white;
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.25);
+        }
+
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #4f46e5, #4338ca);
+            box-shadow: 0 6px 16px rgba(99, 102, 241, 0.4);
+            transform: translateY(-1px);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+    </style>
+</head>
+<body>
+    <div class="dialog-container">
+        <div class="dialog-header">
+            <h1>Model Parameters: ${modelName}</h1>
+            <p>Enter parameters required for this solver run</p>
+        </div>
+        <form id="params-form" onsubmit="submitForm(event)">
+            ${formFieldsHtml}
+            <div class="btn-container">
+                <button type="button" class="btn btn-secondary" onclick="cancel()">Cancel</button>
+                <button type="submit" class="btn btn-primary">OK</button>
+            </div>
+        </form>
+    </div>
+
+    <script>
+        const vscode = acquireVsCodeApi();
+
+        window.addEventListener('DOMContentLoaded', () => {
+            const firstInput = document.querySelector('.param-input');
+            if (firstInput) {
+                firstInput.focus();
+            }
+        });
+
+        function submitForm(event) {
+            event.preventDefault();
+            const form = document.getElementById('params-form');
+            const values = {};
+            const inputs = form.querySelectorAll('.param-input');
+            for (const input of inputs) {
+                values[input.name] = input.value;
+            }
+            vscode.postMessage({
+                command: 'submit',
+                values: values
+            });
+        }
+
+        function cancel() {
+            vscode.postMessage({ command: 'cancel' });
+        }
+
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                cancel();
+            }
+        });
+    </script>
+</body>
+</html>`;
+}
+
+function showParameterDialog(modelPath, selectedDataPath, inputParams, onConfirm) {
+    const modelName = path.basename(modelPath);
+    const panel = vscode.window.createWebviewPanel(
+        'minizincParameters',
+        `MiniZinc Parameters: ${modelName}`,
+        vscode.ViewColumn.Active,
+        {
+            enableScripts: true,
+            retainContextWhenHidden: true
+        }
+    );
+
+    panel.webview.html = getParameterWebviewContent(modelName, inputParams);
+
+    panel.webview.onDidReceiveMessage(
+        async (message) => {
+            if (message.command === 'submit') {
+                const values = message.values;
+                const tempDznPath = path.join(path.dirname(modelPath), `.temp_params_${Date.now()}.dzn`);
+                let dznContent = "% Temporarily generated parameter values\n";
+                for (const [key, val] of Object.entries(values)) {
+                    dznContent += `${key} = ${val};\n`;
+                }
+                try {
+                    fs.writeFileSync(tempDznPath, dznContent);
+                    panel.dispose();
+                    if (onConfirm) {
+                        await onConfirm(tempDznPath);
+                    } else {
+                        await executeModel(modelPath, selectedDataPath, tempDznPath);
+                    }
+                } catch (e) {
+                    vscode.window.showErrorMessage(`Failed to write parameter values: ${e.message}`);
+                }
+            } else if (message.command === 'cancel') {
+                panel.dispose();
+            }
+        }
+    );
+}
+
+async function runModelWithParametersCheck(modelPath, selectedDataPath) {
+    await vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification,
+        title: "MiniZinc: Analyzing model parameters...",
+        cancellable: false
+    }, async () => {
+        const analysis = await analyzeModelParameters(modelPath, selectedDataPath);
+        if (analysis && analysis.input && Object.keys(analysis.input).length > 0) {
+            showParameterDialog(modelPath, selectedDataPath, analysis.input);
+        } else {
+            await executeModel(modelPath, selectedDataPath, null);
+        }
     });
 }
 
@@ -1050,11 +1516,16 @@ function getWebviewContent(modelName, solvers, dznFiles, cspSource) {
         .terminal-header {
             padding: 10px 16px;
             background-color: rgba(255, 255, 255, 0.02);
-            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+            border-bottom: 1px solid transparent;
             display: flex;
             justify-content: space-between;
             align-items: center;
             cursor: pointer;
+            transition: border-color 0.2s ease;
+        }
+
+        .terminal-header.expanded {
+            border-bottom-color: rgba(255, 255, 255, 0.03);
         }
 
         .terminal-header span {
@@ -1063,6 +1534,15 @@ function getWebviewContent(modelName, solvers, dznFiles, cspSource) {
             text-transform: uppercase;
             letter-spacing: 0.05em;
             color: var(--text-secondary);
+        }
+
+        .terminal-header svg {
+            transition: transform 0.2s ease;
+            transform: rotate(-90deg);
+        }
+
+        .terminal-header.expanded svg {
+            transform: rotate(0deg);
         }
 
         .terminal-content {
@@ -1194,7 +1674,7 @@ function getWebviewContent(modelName, solvers, dznFiles, cspSource) {
                     <span>Raw Output Console</span>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
                 </div>
-                <pre class="terminal-content" id="terminal-log" style="display: block;">Waiting for run...</pre>
+                <pre class="terminal-content" id="terminal-log" style="display: none;">Waiting for run...</pre>
             </div>
         </div>
     </div>
@@ -1236,8 +1716,10 @@ function getWebviewContent(modelName, solvers, dznFiles, cspSource) {
         terminalToggle.addEventListener('click', () => {
             if (terminalLog.style.display === 'none') {
                 terminalLog.style.display = 'block';
+                terminalToggle.classList.add('expanded');
             } else {
                 terminalLog.style.display = 'none';
+                terminalToggle.classList.remove('expanded');
             }
         });
 
@@ -1289,6 +1771,9 @@ function getWebviewContent(modelName, solvers, dznFiles, cspSource) {
             const message = event.data;
 
             switch (message.type) {
+                case 'clear':
+                    clearDashboard();
+                    break;
                 case 'start':
                     runBtn.disabled = true;
                     stopBtn.disabled = false;
@@ -1390,6 +1875,14 @@ function getWebviewContent(modelName, solvers, dznFiles, cspSource) {
             }
         });
 
+        // Add keydown listener to clear dashboard with Ctrl+K shortcut when focused in the webview
+        window.addEventListener('keydown', event => {
+            if ((event.ctrlKey || event.metaKey) && (event.key === 'k' || event.key === 'K')) {
+                event.preventDefault();
+                clearDashboard();
+            }
+        });
+
         function copyText(id) {
             const text = solutionTexts[id];
             vscode.postMessage({
@@ -1467,7 +1960,7 @@ function runDiagnostics(document, diagnosticCollection) {
                 if (locMatches.length > 0) {
                     lineNum = parseInt(locMatches[0][2], 10);
                     colStart = parseInt(locMatches[0][3], 10);
-                    colEnd = locMatches[0][4] ? parseInt(locMatches[0][4], 10) : colStart + 1;
+                    colEnd = locMatches[0][4] ? parseInt(locMatches[0][4], 10) : colStart;
                 } else {
                     const lineRegex = /line\s+(\d+)/i;
                     const lineMatch = stderr.match(lineRegex);
@@ -1483,13 +1976,25 @@ function runDiagnostics(document, diagnosticCollection) {
                 }
 
                 const lineText = document.lineAt(Math.max(0, lineNum - 1)).text;
-                if (colEnd > lineText.length + 1) {
-                    colEnd = lineText.length + 1;
+                if (colEnd > lineText.length) {
+                    colEnd = lineText.length;
+                }
+
+                // If the error message mentions a specific identifier, try to narrow the underline range to just that word
+                const identMatch = message.match(/no function or predicate with name `([^']+)'/) ||
+                                   message.match(/undefined identifier `([^']+)'/) ||
+                                   message.match(/variable `([^']+)'/i);
+                if (identMatch) {
+                    const ident = identMatch[1];
+                    const startIdx = Math.max(0, colStart - 1);
+                    if (lineText.substring(startIdx).startsWith(ident)) {
+                        colEnd = colStart + ident.length - 1;
+                    }
                 }
 
                 const range = new vscode.Range(
                     new vscode.Position(Math.max(0, lineNum - 1), Math.max(0, colStart - 1)),
-                    new vscode.Position(Math.max(0, lineNum - 1), Math.max(0, colEnd - 1))
+                    new vscode.Position(Math.max(0, lineNum - 1), Math.max(0, colEnd))
                 );
 
                 log('Adding diagnostic at line ' + lineNum + ', range ' + range.start.line + ':' + range.start.character + '-' + range.end.character + ', message: ' + message);

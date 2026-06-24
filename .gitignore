@@ -13,3 +13,8 @@ jspm_packages/
 # OS metadata
 .DS_Store
 Thumbs.db
+
+# Models & Data files
+models/
+data/
+

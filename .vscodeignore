@@ -6,3 +6,6 @@ install.sh
 .git/
 .gitignore
 .vscode/
+models/
+data/
+
