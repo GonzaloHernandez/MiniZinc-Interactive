@@ -1,6 +1,0 @@
-% Data for Knapsack Problem
-
-n = 5;
-capacity = 15;
-profits = [10, 12, 14, 18, 20];
-weights = [2, 3, 5, 7, 9];
