@@ -6,6 +6,7 @@ const fs = require('fs');
 let activeProcess = null;
 let standardOutputChannel = null;
 let activeDashboardPanel = null;
+const dataFile = new Map(); // Stores a text variable for each opened MZN file (key: file path, value: string)
 
 function log(msg) {
     try {
@@ -229,6 +230,32 @@ function activate(context) {
     log('activate called');
     console.log('MiniZinc-Interactive extension is now active!');
 
+    // Create status bar item to show active file name
+    const fileStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+    fileStatusBarItem.command = 'minizinc.statusBarClicked';
+    fileStatusBarItem.tooltip = 'Click to manage associated data file (DZN)';
+    context.subscriptions.push(fileStatusBarItem);
+
+    function updateStatusBarItem() {
+        const editor = vscode.window.activeTextEditor;
+        if (editor && editor.document.languageId === 'minizinc') {
+            const associatedDzn = dataFile.get(editor.document.uri.fsPath);
+            if (associatedDzn) {
+                fileStatusBarItem.text = `$(file) ${path.basename(associatedDzn)}`;
+            } else {
+                fileStatusBarItem.text = `No DZN file`;
+            }
+        } else {
+            fileStatusBarItem.text = `No DZN file`;
+        }
+        fileStatusBarItem.show();
+    }
+
+    context.subscriptions.push(
+        vscode.window.onDidChangeActiveTextEditor(updateStatusBarItem)
+    );
+    updateStatusBarItem();
+
     // Initialize output channel
     standardOutputChannel = vscode.window.createOutputChannel("MiniZinc Standard Run");
 
@@ -268,9 +295,21 @@ function activate(context) {
         })
     );
 
+    // Initialize variables for already open MZN documents
+    vscode.workspace.textDocuments.forEach(document => {
+        if (document.languageId === 'minizinc') {
+            if (!dataFile.has(document.uri.fsPath)) {
+                dataFile.set(document.uri.fsPath, "");
+            }
+        }
+    });
+
     context.subscriptions.push(
         vscode.workspace.onDidOpenTextDocument(document => {
             if (document.languageId === 'minizinc') {
+                if (!dataFile.has(document.uri.fsPath)) {
+                    dataFile.set(document.uri.fsPath, "");
+                }
                 runDiagnostics(document, diagnosticCollection);
             }
         })
@@ -281,12 +320,18 @@ function activate(context) {
             if (diagnosticCollection.has(document.uri)) {
                 diagnosticCollection.delete(document.uri);
             }
+            if (document.languageId === 'minizinc') {
+                dataFile.delete(document.uri.fsPath);
+            }
         })
     );
 
     // Initial check for currently visible editors
     vscode.window.visibleTextEditors.forEach(editor => {
         if (editor.document.languageId === 'minizinc') {
+            if (!dataFile.has(editor.document.uri.fsPath)) {
+                dataFile.set(editor.document.uri.fsPath, "");
+            }
             runDiagnostics(editor.document, diagnosticCollection);
         }
     });
@@ -301,7 +346,9 @@ function activate(context) {
         if (activeEditor.document.isDirty) {
             await activeEditor.document.save();
         }
-        await runModelWithParametersCheck(activeEditor.document.uri.fsPath, null);
+        const modelPath = activeEditor.document.uri.fsPath;
+        const associatedDzn = dataFile.get(modelPath) || null;
+        await runModelWithParametersCheck(modelPath, associatedDzn);
     });
 
     // Command 1.2: Run Model with Data Selection (1-Click file picker)
@@ -336,6 +383,8 @@ function activate(context) {
                 return;
             }
             selectedDataPath = pick.path;
+            dataFile.set(modelPath, selectedDataPath);
+            updateStatusBarItem();
         } else {
             vscode.window.showInformationMessage('No .dzn data files found in the workspace. Running directly.');
         }
@@ -394,6 +443,14 @@ function activate(context) {
                         if (doc && doc.isDirty) {
                             await doc.save();
                         }
+
+                        // Store the selected DZN file in the dataFile map
+                        if (message.dataPath) {
+                            dataFile.set(modelPath, message.dataPath);
+                        } else {
+                            dataFile.set(modelPath, "");
+                        }
+                        updateStatusBarItem();
 
                         // Check for missing parameters
                         vscode.window.withProgress({
@@ -528,10 +585,48 @@ function activate(context) {
         }
     });
 
+    let statusBarClickedDisposable = vscode.commands.registerCommand('minizinc.statusBarClicked', async () => {
+        const activeEditor = vscode.window.activeTextEditor;
+        if (!activeEditor || activeEditor.document.languageId !== 'minizinc') {
+            return;
+        }
+
+        const modelPath = activeEditor.document.uri.fsPath;
+        const currentDzn = dataFile.get(modelPath);
+
+        const choices = [];
+        if (currentDzn) {
+            choices.push({
+                label: '$(trash) Clear Data File Association',
+                description: `Remove ${path.basename(currentDzn)}`,
+                action: 'clear'
+            });
+        }
+        choices.push({
+            label: '$(database) Select Data File (DZN)...',
+            action: 'select'
+        });
+
+        const pick = await vscode.window.showQuickPick(choices, {
+            placeHolder: 'MiniZinc Data File (DZN) Options'
+        });
+
+        if (!pick) return;
+
+        if (pick.action === 'clear') {
+            dataFile.set(modelPath, "");
+            updateStatusBarItem();
+            vscode.window.showInformationMessage('Cleared data file association for this model.');
+        } else if (pick.action === 'select') {
+            vscode.commands.executeCommand('minizinc.runModelWithData');
+        }
+    });
+
     context.subscriptions.push(runModelDisposable);
     context.subscriptions.push(runModelWithDataDisposable);
     context.subscriptions.push(openDashboardDisposable);
     context.subscriptions.push(clearOutputDisposable);
+    context.subscriptions.push(statusBarClickedDisposable);
 
     // Register Rename Provider (F2)
     const renameProvider = vscode.languages.registerRenameProvider('minizinc', {
@@ -769,7 +864,7 @@ function getParameterWebviewContent(modelName, inputParams) {
     for (const [name, paramInfo] of Object.entries(inputParams)) {
         const typeLabel = getParameterTypeLabel(paramInfo);
         const placeholder = getParameterPlaceholder(paramInfo);
-        
+
         if (!paramInfo.dim && paramInfo.type === 'bool') {
             formFieldsHtml += `
             <div class="form-group">
@@ -1982,8 +2077,8 @@ function runDiagnostics(document, diagnosticCollection) {
 
                 // If the error message mentions a specific identifier, try to narrow the underline range to just that word
                 const identMatch = message.match(/no function or predicate with name `([^']+)'/) ||
-                                   message.match(/undefined identifier `([^']+)'/) ||
-                                   message.match(/variable `([^']+)'/i);
+                    message.match(/undefined identifier `([^']+)'/) ||
+                    message.match(/variable `([^']+)'/i);
                 if (identMatch) {
                     const ident = identMatch[1];
                     const startIdx = Math.max(0, colStart - 1);

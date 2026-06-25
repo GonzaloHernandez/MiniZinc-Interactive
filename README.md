@@ -6,13 +6,15 @@ A VS Code extension that brings interactive development, real-time diagnostics, 
 
 ### Direct Compilation & Execution (Standard Run)
 Compile and run models instantly without leaving your code editor.
-- **Top-Right Quick-Access Icons**: Click the Play (`▶`) or Play-Circle (`⚪▶`) icons on the top-right editor bar to execute your model immediately.
+- **Top-Right Quick-Access Icon**: Click the Play (`▶`) icon on the top-right editor bar to execute your model immediately, or the dropdown arrow (`∨`) next to it to run it with data.
 - **Keyboard Shortcuts**: Run models directly using the default keyboard shortcut `Ctrl+R` (or `Cmd+R` on macOS) or `Ctrl+F5`.
 - **Run with Data File Picker**: Prompt and select `.dzn` data files interactively from your workspace using a fast search dropdown list.
+- **Associated Data File Status Indicator**: Displays the currently associated `.dzn` data file for your active `.mzn` model in the status bar. Clicking it opens a quick menu to change or clear the association.
 - **Standard Output Terminal**: Visualizes all solver outputs and execution statistics in a dedicated "MiniZinc Standard Run" output panel.
 
 ### Solver Dashboard
 For a more advanced interface, launch the interactive Solver Dashboard webview.
+- **Top-Right Quick-Access Icon**: Click the circular Dashboard icon on the top-right editor bar to open the dashboard webview.
 - **Custom Solvers**: Select dynamically from any locally installed MiniZinc solver (e.g., Gecode, Chuffed, COIN-OR CBC, etc.).
 - **Interactive Control**: Stop, restart, or run models dynamically.
 - **Real-Time Stream**: Visualizes solution streaming, search statistics, and solver exit statuses.
@@ -72,8 +74,9 @@ Once installed, reload your VS Code window (`Ctrl+Shift+P` / `Cmd+Shift+P` ➡�
 | `minizinc.runModel` | **MiniZinc: Run Model Directly** | `Ctrl+R` / `Cmd+R` / `Ctrl+F5` | Compiles and runs the active model directly with default settings. |
 | `minizinc.runModelWithData` | **MiniZinc: Run Model with Data File...** | - | Prompts for a workspace `.dzn` file and runs the model. |
 | `minizinc.openDashboard` | **MiniZinc: Open Interactive Solver Dashboard** | - | Launches the graphical webview solver dashboard. |
+| `minizinc.statusBarClicked` | **MiniZinc: Status Bar Menu** | - | Opens options to select or clear the DZN file associated with the active MZN model. |
 
-*You can trigger these commands from the Command Palette, the editor tab title bar (using the shortcut icons), or via the editor context menu (right-click).*
+*You can trigger these commands from the Command Palette, the editor tab title bar (using the shortcut icons), the editor context menu (right-click), or by clicking the status bar component.*
 
 ---
 
