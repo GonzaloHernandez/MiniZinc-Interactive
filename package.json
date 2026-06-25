@@ -2,7 +2,7 @@
   "name": "minizinc-interactive",
   "displayName": "MiniZinc Interactive",
   "description": "Sleek, interactive MiniZinc extension featuring real-time diagnostics (linter), autocomplete snippets, and a premium Solver Dashboard.",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "author": "Gonzalo Hernandez",
   "publisher": "sonar-dev",
   "icon": "icon.png",
